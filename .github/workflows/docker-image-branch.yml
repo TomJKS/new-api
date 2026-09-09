@@ -4,9 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       branch:
-        description: "Branch name to build (e.g. alpha, nightly)"
+        description: "Branch in this fork to build (must already be pushed)"
         required: true
         type: string
+        default: local-custom
 
 # Fork build: publish to this repository's own GHCR namespace instead of the
 # upstream Docker Hub account. GHCR requires a lowercase image name.
