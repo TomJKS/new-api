@@ -8,6 +8,11 @@ on:
         required: true
         type: string
 
+# Fork build: publish to this repository's own GHCR namespace instead of the
+# upstream Docker Hub account. GHCR requires a lowercase image name.
+env:
+  REPO_IMAGE: ghcr.io/tomjks/new-api
+
 jobs:
   prepare:
     name: Prepare Docker tags
@@ -65,7 +70,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
-      id-token: write
+      packages: write
     steps:
       - name: Check out branch
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -81,18 +86,19 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
-      - name: Log in to Docker Hub
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@c99871dec2022cc055c062a10cc1a1310835ceb4 # v4.3.0
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata (labels)
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: |
-            calciumion/new-api
+            ${{ env.REPO_IMAGE }}
 
       - name: Build & push single-arch
         id: build
@@ -102,69 +108,71 @@ jobs:
           platforms: ${{ matrix.platform }}
           push: true
           tags: |
-            calciumion/new-api:${{ needs.prepare.outputs.tag_prefix }}-${{ matrix.arch }}
-            calciumion/new-api:${{ needs.prepare.outputs.version }}-${{ matrix.arch }}
+            ${{ env.REPO_IMAGE }}:${{ needs.prepare.outputs.tag_prefix }}-${{ matrix.arch }}
+            ${{ env.REPO_IMAGE }}:${{ needs.prepare.outputs.version }}-${{ matrix.arch }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max
           sbom: true
 
-      - name: Install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-
-      - name: Sign image with cosign
-        run: cosign sign --yes calciumion/new-api@${{ steps.build.outputs.digest }}
-
       - name: Output digest
+        env:
+          TAG_PREFIX: ${{ needs.prepare.outputs.tag_prefix }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          echo "### Docker Image Digest (${{ matrix.arch }})" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "calciumion/new-api:${{ needs.prepare.outputs.tag_prefix }}-${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
-          echo "calciumion/new-api:${{ needs.prepare.outputs.version }}-${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.build.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          {
+            echo "### Docker Image Digest (${{ matrix.arch }})"
+            echo '```'
+            echo "$REPO_IMAGE:$TAG_PREFIX-${{ matrix.arch }}"
+            echo "$REPO_IMAGE:$VERSION-${{ matrix.arch }}"
+            echo "$DIGEST"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   create_manifests:
-    name: Create multi-arch manifests (Docker Hub)
+    name: Create multi-arch manifests (GHCR)
     needs: [prepare, build_single_arch]
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
+      packages: write
     steps:
-      - name: Log in to Docker Hub
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@c99871dec2022cc055c062a10cc1a1310835ceb4 # v4.3.0
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create & push manifest (Docker Hub - branch)
+      - name: Create & push manifest (branch)
+        env:
+          TAG_PREFIX: ${{ needs.prepare.outputs.tag_prefix }}
         run: |
           docker buildx imagetools create \
-            -t calciumion/new-api:${{ needs.prepare.outputs.tag_prefix }} \
-            calciumion/new-api:${{ needs.prepare.outputs.tag_prefix }}-amd64 \
-            calciumion/new-api:${{ needs.prepare.outputs.tag_prefix }}-arm64
+            -t "$REPO_IMAGE:$TAG_PREFIX" \
+            "$REPO_IMAGE:$TAG_PREFIX-amd64" \
+            "$REPO_IMAGE:$TAG_PREFIX-arm64"
 
-      - name: Create & push manifest (Docker Hub - versioned)
+      - name: Create & push manifest (versioned)
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           docker buildx imagetools create \
-            -t calciumion/new-api:${{ needs.prepare.outputs.version }} \
-            calciumion/new-api:${{ needs.prepare.outputs.version }}-amd64 \
-            calciumion/new-api:${{ needs.prepare.outputs.version }}-arm64
-
-      - name: Install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-
-      - name: Sign manifests with cosign
-        run: |
-          cosign sign --yes calciumion/new-api:${{ needs.prepare.outputs.tag_prefix }}
-          cosign sign --yes calciumion/new-api:${{ needs.prepare.outputs.version }}
+            -t "$REPO_IMAGE:$VERSION" \
+            "$REPO_IMAGE:$VERSION-amd64" \
+            "$REPO_IMAGE:$VERSION-arm64"
 
       - name: Output manifest digest
+        env:
+          TAG_PREFIX: ${{ needs.prepare.outputs.tag_prefix }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          echo "### Multi-arch Manifest Digests" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          docker buildx imagetools inspect calciumion/new-api:${{ needs.prepare.outputs.tag_prefix }} >> $GITHUB_STEP_SUMMARY
-          echo "---" >> $GITHUB_STEP_SUMMARY
-          docker buildx imagetools inspect calciumion/new-api:${{ needs.prepare.outputs.version }} >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          {
+            echo "### Multi-arch Manifest Digests"
+            echo '```'
+            docker buildx imagetools inspect "$REPO_IMAGE:$TAG_PREFIX"
+            echo "---"
+            docker buildx imagetools inspect "$REPO_IMAGE:$VERSION"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
