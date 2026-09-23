@@ -303,6 +303,26 @@ func IsOpenAIGPT5Model(modelName string) bool {
 	return modelName == "gpt-5" || strings.HasPrefix(modelName, "gpt-5-") || strings.HasPrefix(modelName, "gpt-5.")
 }
 
+// IsOpenAIGPT6Model identifies known GPT-6 models and their dated snapshots.
+func IsOpenAIGPT6Model(modelName string) bool {
+	for _, baseModel := range []string{
+		"gpt-6-astra",
+		"gpt-6-luna",
+		"gpt-6-sol",
+		"chatgpt-6-astra",
+		"chatgpt-6-luna",
+		"chatgpt-6-sol",
+		"chatgpt6-astra",
+		"chatgpt6-luna",
+		"chatgpt6-sol",
+	} {
+		if isOpenAIModelSnapshot(modelName, baseModel) {
+			return true
+		}
+	}
+	return false
+}
+
 // OpenAIChatCapabilities describes independent Chat Completions compatibility rules.
 type OpenAIChatCapabilities struct {
 	UseMaxCompletionTokens bool
@@ -329,7 +349,7 @@ func GetOpenAIChatCapabilities(modelName, reasoningEffort string) OpenAIChatCapa
 	}
 
 	isGPT5Model := IsOpenAIGPT5Model(modelName)
-	if !isGPT5Model && !isOpenAIModelSnapshot(modelName, "gpt-6-astra") {
+	if !isGPT5Model && !IsOpenAIGPT6Model(modelName) {
 		return capabilities
 	}
 	capabilities.UseMaxCompletionTokens = true

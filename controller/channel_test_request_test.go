@@ -187,7 +187,15 @@ func TestOpenAIChatSamplingCompatibility(t *testing.T) {
 }
 
 func TestOpenAIChatTokenLimitCompatibility(t *testing.T) {
-	for _, modelName := range []string{"gpt-5", "o3-mini", "gpt-6-astra"} {
+	for _, modelName := range []string{
+		"gpt-5",
+		"o3-mini",
+		"gpt-6-astra",
+		"gpt-6-luna",
+		"gpt-6-sol",
+		"chatgpt6-luna",
+		"chatgpt6-sol",
+	} {
 		for _, tt := range []struct {
 			name  string
 			input string
