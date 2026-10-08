@@ -317,6 +317,41 @@ func IsOpenAIGPT5Model(modelName string) bool {
 	return modelName == "gpt-5" || strings.HasPrefix(modelName, "gpt-5-") || strings.HasPrefix(modelName, "gpt-5.")
 }
 
+// IsOpenAIGPT6Model identifies the GPT-6 chat family by prefix: the astra,
+// luna, and sol codenames, generational successors such as gpt-6.1-sol,
+// dated snapshots, and the chatgpt-6/chatgpt6 aliases.
+func IsOpenAIGPT6Model(modelName string) bool {
+	for _, family := range []string{"gpt-6", "chatgpt-6", "chatgpt6"} {
+		if rest, ok := strings.CutPrefix(modelName, family); ok && (rest == "" || rest[0] == '-' || rest[0] == '.') {
+			return true
+		}
+	}
+	return false
+}
+
+// isOpenAIGPT6SolLunaModel reports whether a GPT-6 name carries the sol or
+// luna codename, including generational successors such as gpt-6.1-sol.
+func isOpenAIGPT6SolLunaModel(modelName string) bool {
+	for _, family := range []string{"gpt-6", "chatgpt-6", "chatgpt6"} {
+		rest, ok := strings.CutPrefix(modelName, family)
+		if !ok || (rest != "" && rest[0] != '-' && rest[0] != '.') {
+			continue
+		}
+		// A successor generation inserts a version segment before the codename
+		// (gpt-6.1-sol); the codename follows the first remaining separator.
+		_, codename, found := strings.Cut(strings.TrimPrefix(rest, "."), "-")
+		if !found {
+			continue
+		}
+		for _, base := range []string{"sol", "luna"} {
+			if isOpenAIModelSnapshot(codename, base) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // OpenAIChatCapabilities describes independent Chat Completions compatibility rules.
 type OpenAIChatCapabilities struct {
 	UseMaxCompletionTokens bool
@@ -343,8 +378,7 @@ func GetOpenAIChatCapabilities(modelName, reasoningEffort string) OpenAIChatCapa
 	}
 
 	isGPT5Model := IsOpenAIGPT5Model(modelName)
-	isGPT6SolLuna := isOpenAIModelSnapshot(modelName, "gpt-6-sol") || isOpenAIModelSnapshot(modelName, "gpt-6-luna")
-	if !isGPT5Model && !isGPT6SolLuna && !isOpenAIModelSnapshot(modelName, "gpt-6-astra") {
+	if !isGPT5Model && !IsOpenAIGPT6Model(modelName) {
 		return capabilities
 	}
 	capabilities.UseMaxCompletionTokens = true
@@ -352,15 +386,16 @@ func GetOpenAIChatCapabilities(modelName, reasoningEffort string) OpenAIChatCapa
 
 	// These standard GPT-5 models default to none and support sampling only
 	// without reasoning. Named variants (pro, codex, chat-latest, etc.) do not
-	// inherit this exception. GPT-6 Sol and Luna follow the same rule. GPT-6
-	// Astra never supports these parameters.
+	// inherit this exception. GPT-6 Sol and Luna, including generational
+	// successors such as gpt-6.1-sol, follow the same rule. GPT-6 Astra never
+	// supports these parameters.
 	// https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.2
 	// https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.4
 	// https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6-astra
 	// https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6-luna
 	supportsSampling := false
 	if reasoningEffort == "" || reasoningEffort == "none" {
-		supportsSampling = isGPT6SolLuna
+		supportsSampling = isOpenAIGPT6SolLunaModel(modelName)
 		for _, model := range []string{"gpt-5.1", "gpt-5.2", "gpt-5.4"} {
 			if isOpenAIModelSnapshot(modelName, model) {
 				supportsSampling = true
