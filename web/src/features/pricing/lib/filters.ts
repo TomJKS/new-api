@@ -24,7 +24,7 @@ import {
   ENDPOINT_TYPES,
 } from '../constants'
 import type { PricingModel } from '../types'
-import { hasTaskUsageSchema } from './dynamic-price'
+import { getDynamicPricingSummary, hasTaskUsageSchema } from './dynamic-price'
 
 // ----------------------------------------------------------------------------
 // Filter Utilities
@@ -106,10 +106,21 @@ export function filterByEndpointType(
 }
 
 /**
- * Get model price for sorting
+ * Get the model price used for sorting, in the same unit the price column
+ * displays: USD per 1M tokens (or per call for fixed pricing). Dynamic
+ * expression models sort by their first primary entry because model_ratio is
+ * only a placeholder fallback (default 37.5) when no legacy ratio exists.
  */
 function getModelPrice(model: PricingModel): number {
-  return model.quota_type === 0 ? model.model_ratio : model.model_price || 0
+  const summary = getDynamicPricingSummary(model, { tokenUnit: 'M' })
+  const primary =
+    summary?.primaryEntries.find((entry) => entry.unit === 'token') ??
+    summary?.primaryEntries[0]
+  if (primary) return primary.minValue ?? primary.value
+  // Legacy ratio pricing: model_ratio * 2 is the USD input price per 1M
+  // tokens (see calculateTokenPrice in price.ts), the unit dynamic entries
+  // use, so mixed lists keep one consistent order.
+  return model.quota_type === 0 ? model.model_ratio * 2 : model.model_price || 0
 }
 
 /**
@@ -128,11 +139,18 @@ export function sortModels(
       )
       break
     case SORT_OPTIONS.PRICE_LOW:
-      sorted.sort((a, b) => getModelPrice(a) - getModelPrice(b))
+    case SORT_OPTIONS.PRICE_HIGH: {
+      // A dynamic summary parses the billing expression, so resolve each
+      // price once instead of per comparison.
+      const priceOf = new Map<PricingModel, number>()
+      for (const model of sorted) priceOf.set(model, getModelPrice(model))
+      const direction = sortBy === SORT_OPTIONS.PRICE_LOW ? 1 : -1
+      sorted.sort(
+        (a, b) =>
+          ((priceOf.get(a) ?? 0) - (priceOf.get(b) ?? 0)) * direction
+      )
       break
-    case SORT_OPTIONS.PRICE_HIGH:
-      sorted.sort((a, b) => getModelPrice(b) - getModelPrice(a))
-      break
+    }
   }
 
   return sorted
