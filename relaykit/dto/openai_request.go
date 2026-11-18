@@ -331,24 +331,18 @@ func IsOpenAIGPT6Model(modelName string) bool {
 	return false
 }
 
-// isOpenAIGPT6SolLunaModel reports whether a GPT-6 name carries the sol or
-// luna codename, including generational successors such as gpt-6.1-sol.
+// isOpenAIGPT6SolLunaModel reports whether a name is the first-generation GPT-6
+// Sol or Luna model (or its chatgpt-6/chatgpt6 alias). Successors such as
+// gpt-6.1-sol and gpt-6.2-sol do not support sampling parameters, so a version
+// segment before the codename never matches.
 func isOpenAIGPT6SolLunaModel(modelName string) bool {
 	for _, family := range []string{"gpt-6", "chatgpt-6", "chatgpt6"} {
-		rest, ok := strings.CutPrefix(modelName, family)
-		if !ok || (rest != "" && rest[0] != '-' && rest[0] != '.') {
+		codename, ok := strings.CutPrefix(modelName, family+"-")
+		if !ok {
 			continue
 		}
-		// A successor generation inserts a version segment before the codename
-		// (gpt-6.1-sol); the codename follows the first remaining separator.
-		_, codename, found := strings.Cut(strings.TrimPrefix(rest, "."), "-")
-		if !found {
-			continue
-		}
-		for _, base := range []string{"sol", "luna"} {
-			if isOpenAIModelSnapshot(codename, base) {
-				return true
-			}
+		if isOpenAIModelSnapshot(codename, "sol") || isOpenAIModelSnapshot(codename, "luna") {
+			return true
 		}
 	}
 	return false
@@ -388,16 +382,22 @@ func GetOpenAIChatCapabilities(modelName, reasoningEffort string) OpenAIChatCapa
 
 	// These standard GPT-5 models default to none and support sampling only
 	// without reasoning. Named variants (pro, codex, chat-latest, etc.) do not
-	// inherit this exception. GPT-6 Sol and Luna, including generational
-	// successors such as gpt-6.1-sol, follow the same rule. GPT-6 Astra never
-	// supports these parameters.
+	// inherit this exception. GPT-6 Sol and Luna follow the same rule. GPT-6
+	// Astra, GPT-6.1 Sol, GPT-6.2 Astra and GPT-6.2 Sol never support these
+	// parameters. GPT-6.1 Terra defaults to medium, so it keeps them only
+	// with an explicit none. Every GPT-6 name still takes max_completion_tokens
+	// and the developer role through IsOpenAIGPT6Model.
 	// https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.2
 	// https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.4
 	// https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6-astra
 	// https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6-luna
+	// https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6.1-sol
+	// https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6.1-terra
+	// https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6.2-astra
 	supportsSampling := false
 	if reasoningEffort == "" || reasoningEffort == "none" {
-		supportsSampling = isOpenAIGPT6SolLunaModel(modelName)
+		supportsSampling = isOpenAIGPT6SolLunaModel(modelName) ||
+			(reasoningEffort == "none" && isOpenAIModelSnapshot(modelName, "gpt-6.1-terra"))
 		for _, model := range []string{"gpt-5.1", "gpt-5.2", "gpt-5.4"} {
 			if isOpenAIModelSnapshot(modelName, model) {
 				supportsSampling = true
